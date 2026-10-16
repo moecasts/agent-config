@@ -2,6 +2,12 @@
   "name": "@cocasts/agent-config",
   "version": "0.1.0",
   "description": "Install project-aware rules and skills for coding agents.",
+  "license": "MIT",
+  "author": "moecasts <moecasts.caster@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moecasts/agent-config.git"
+  },
   "type": "module",
   "bin": {
     "acli": "./dist/cli.js"

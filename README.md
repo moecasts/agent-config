@@ -128,3 +128,7 @@ Validate the npm payload from `packages/cli`:
 cd packages/cli
 npm pack --dry-run
 ```
+
+## License
+
+[MIT](LICENSE) © [moecasts](https://github.com/moecasts) <moecasts.caster@gmail.com>
