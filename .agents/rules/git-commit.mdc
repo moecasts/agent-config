@@ -1,0 +1,58 @@
+---
+trigger: model_decision
+description: Apply when planning or creating Git commits.
+alwaysApply: false
+---
+
+# Git Commit Rules
+
+## Format
+
+`type(scope): description`
+
+- Use lowercase English only.
+- Write a subject line only, with no body.
+- Do not add trailers such as `Co-Authored-By` or `Signed-off-by`.
+
+## Types
+
+`feat`, `fix`, `refactor`, `chore`, `docs`, `style`, `test`, `perf`, `ci`,
+`build`
+
+## Detected scopes
+
+- Use `agent` for `packages/agent`.
+- Use `cli` for `packages/cli`.
+- Use `core` for `packages/core`.
+- Use `packs` for `packages/packs`.
+
+- Treat detected scopes as preferred defaults, not an exhaustive whitelist.
+- For an unlisted module under `packages/`, derive the scope from the package
+  directory name.
+- Use `root` for repository-wide files such as the root `package.json`,
+  `tsconfig*.json`, `biome.json`, `bun.lock`, and `.gitignore`.
+- Use `root/agents` for `AGENTS.md`, `.agents/**`, and agent adapters.
+
+- Prefer `scope/module`, such as `cli/ui`, `cli/commands`, or
+  `packs/git-commit`.
+- Use a bare scope only when a change genuinely spans multiple modules.
+- For cross-scope changes, use comma-separated bare scopes only:
+  `chore(core,packs): update shared tooling`.
+
+## Type-specific scope rules
+
+- Use `docs(root)` for top-level documentation such as `README.md`.
+- Use the package scope for package-specific documentation.
+
+## Commit ordering in multi-commit plans
+
+Plan commits in dependency order, with `docs` commits first. This workspace
+depends as `core` -> `packs` -> `agent` -> `cli`; commit a package before the
+packages that depend on it.
+
+## Examples
+
+- `feat(packs/git-commit): detect pnpm workspace scopes`
+- `fix(cli/ui): handle cancelled prompts`
+- `docs(root): document agent mode workflow`
+- `chore(root/agents): update git commit rules`
