@@ -1,0 +1,11 @@
+{
+  "name": "@cocasts/agent-config-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@cocasts/agent-config-core": "workspace:*",
+    "@cocasts/agent-config-packs": "workspace:*"
+  }
+}
