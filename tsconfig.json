@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@cocasts/agent-config-agent": ["./packages/agent/src/index.ts"],
+      "@cocasts/agent-config-core": ["./packages/core/src/index.ts"],
+      "@cocasts/agent-config-packs": ["./packages/packs/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts"]
+}
