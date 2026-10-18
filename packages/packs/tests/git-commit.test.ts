@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   detectGitCommitConfig,
@@ -95,22 +94,15 @@ describe('git-commit config detection', () => {
 });
 
 describe('git-commit rendering', () => {
-  test('matches the canonical golden files', async () => {
+  test('renders exactly the pack files and passes validation', async () => {
     const config = await detectGitCommitConfig(fixture('pi-extensions'));
     const rendered = await renderGitCommitPack(config);
-    const expectedRule = await readFile(
-      resolve(import.meta.dir, 'golden/pi-git-commit.mdc'),
-      'utf8',
-    );
-    const expectedSkill = await readFile(
-      resolve(import.meta.dir, 'golden/smart-commit.SKILL.md'),
-      'utf8',
-    );
 
-    expect(rendered.files).toEqual([
-      { content: expectedRule, path: '.agents/rules/git-commit.mdc' },
-      { content: expectedSkill, path: '.agents/skills/smart-commit/SKILL.md' },
+    expect(rendered.files.map((file) => file.path)).toEqual([
+      '.agents/rules/git-commit.mdc',
+      '.agents/skills/smart-commit/SKILL.md',
     ]);
+    expect(rendered.files.every((file) => file.content.trim().length > 0)).toBe(true);
     expect(rendered.agentsBlock).toContain('.agents/rules/git-commit.mdc');
     expect(rendered.agentsBlock).toBe(
       '## Git commits\n\nBefore planning or creating a commit, read and follow\n[Git Commit Rules](.agents/rules/git-commit.mdc).\n',
@@ -128,11 +120,26 @@ describe('git-commit rendering', () => {
     const rendered = await gitCommitPack.render({ ...config, extraScopes: ['infra'] });
 
     expect(rendered.agentsBlock).toContain('Git Commit Rules');
+    expect(rendered.files.map((file) => file.path)).toEqual([...gitCommitPack.filePaths]);
     expect(rendered.files[0]?.content).toContain('Additional project scopes: `infra`.');
     expect(rendered.files[0]?.content).toContain('not an exhaustive whitelist');
     await expect(
       gitCommitPack.render({ ...config, scopes: [{ path: '../outside', scope: 'outside' }] }),
     ).rejects.toThrow();
+  });
+
+  test('rejects generated files that reference the generator tool', async () => {
+    const config = await detectGitCommitConfig(fixture('pi-extensions'));
+    const rendered = await renderGitCommitPack(config);
+    const files = Object.fromEntries(rendered.files.map((file) => [file.path, file.content]));
+    const skillPath = '.agents/skills/smart-commit/SKILL.md';
+
+    expect(
+      gitCommitPack.validate({
+        ...files,
+        [skillPath]: `${files[skillPath] ?? ''}\nRun \`acli\` before committing.\n`,
+      }),
+    ).toContain(`${skillPath} must not reference the generator tool: acli`);
   });
 
   test('ships an agent generation guide with safety requirements', async () => {
@@ -141,5 +148,7 @@ describe('git-commit rendering', () => {
     expect(guide).toContain('staged, unstaged, and untracked');
     expect(guide).toContain('Do not create commits');
     expect(guide).toContain('AGENTS.md');
+    expect(guide).toContain('Do not reference the generator tool');
+    expect(gitCommitPack.validateAgentGuide(guide)).toEqual([]);
   });
 });

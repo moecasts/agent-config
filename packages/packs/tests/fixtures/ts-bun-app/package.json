@@ -1,0 +1,15 @@
+{
+  "name": "ts-bun-app",
+  "private": true,
+  "packageManager": "bun@1.4.3",
+  "scripts": {
+    "verify": "bun run check && bun run typecheck && bun test",
+    "lint": "biome lint .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

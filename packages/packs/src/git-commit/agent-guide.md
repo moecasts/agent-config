@@ -40,5 +40,8 @@ changes.
 - Do not invent scopes that cannot be explained by repository paths or an
   explicit project convention.
 - Stop on malformed managed markers or ambiguous delegated AGENTS paths.
+- Do not reference the generator tool (`acli`) or its state files inside the
+  generated rule and skill; they must stand on their own in the target
+  repository.
 - After generation, run `acli agent adopt git-commit` to validate and snapshot
   the generated files.

@@ -9,7 +9,7 @@ export interface GitCommitRenderResult {
   files: readonly RenderedFile[];
 }
 
-const defaultTemplateRoot = fileURLToPath(new URL('./templates', import.meta.url));
+export const gitCommitTemplateRoot = fileURLToPath(new URL('./templates', import.meta.url));
 const defaultGuidePath = fileURLToPath(new URL('./agent-guide.md', import.meta.url));
 
 const readTemplate = (templateRoot: string, name: string): Promise<string> =>
@@ -27,13 +27,13 @@ const formatExtraScopes = (config: GitCommitConfig): string =>
 
 export const renderGitCommitPack = async (
   config: GitCommitConfig,
-  templateRoot = defaultTemplateRoot,
+  templateRoot = gitCommitTemplateRoot,
 ): Promise<GitCommitRenderResult> => {
   const parsedConfig = gitCommitConfigSchema.parse(config);
   const [ruleTemplate, skillTemplate, agentsTemplate] = await Promise.all([
     readTemplate(templateRoot, 'git-commit.mdc.tpl'),
     readTemplate(templateRoot, 'smart-commit.SKILL.md.tpl'),
-    readTemplate(templateRoot, 'agents-block.md.tpl'),
+    readTemplate(templateRoot, 'git-commit.agents-block.md.tpl'),
   ]);
 
   return {
