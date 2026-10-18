@@ -55,6 +55,12 @@ describe('project agent skill installation', () => {
 
     const installedSkill = join(projectRoot, '.agents/skills/agent-configurator/SKILL.md');
     expect(await readFile(installedSkill, 'utf8')).toContain('name: agent-configurator');
+    expect(
+      await readFile(
+        join(projectRoot, '.agents/skills/agent-configurator/references/coding-standards.md'),
+        'utf8',
+      ),
+    ).toContain('KISS');
     await writeFile(installedSkill, 'local edit');
 
     await expect(installAgentConfigurator(projectRoot, sourceRoot)).rejects.toThrow(
@@ -78,5 +84,30 @@ describe('project agent skill installation', () => {
     expect(
       await readFile(join(projectRoot, '.agents/skills/agent-configurator/SKILL.md'), 'utf8'),
     ).toContain('name: agent-configurator');
+  });
+
+  test('installs coding-standards from the built Node CLI', async () => {
+    const projectRoot = await temporaryDirectory();
+    await writeFile(join(projectRoot, 'AGENTS.md'), '# Existing\n');
+    const cli = join(import.meta.dir, '../dist/cli.js');
+    const process = Bun.spawn(
+      ['node', cli, 'install', 'coding-standards', '--yes', '--cwd', projectRoot],
+      { stderr: 'pipe', stdout: 'pipe' },
+    );
+    const [exitCode, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stderr).text(),
+    ]);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(
+      await readFile(join(projectRoot, '.agents/rules/coding-standards.mdc'), 'utf8'),
+    ).toContain('KISS');
+    expect(
+      await readFile(join(projectRoot, '.agents/skills/code-quality-review/SKILL.md'), 'utf8'),
+    ).toContain('name: code-quality-review');
+    expect(await readFile(join(projectRoot, 'AGENTS.md'), 'utf8')).toContain(
+      'agent-config:coding-standards:start',
+    );
   });
 });

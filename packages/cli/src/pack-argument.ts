@@ -5,4 +5,4 @@ export const requiredPackArgument = (description: string): Argument =>
   new Argument('<pack>', description).choices(packIds);
 
 export const optionalPackArgument = (description: string): Argument =>
-  new Argument('[pack]', description).choices(packIds).default(packIds[0]);
+  new Argument('[pack]', description).choices(packIds);

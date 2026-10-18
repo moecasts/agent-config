@@ -7,8 +7,9 @@ import {
   projectStateSchema,
   upsertManagedBlock,
 } from '@cocasts/agent-config-core';
-import { gitCommitPack } from '@cocasts/agent-config-packs';
+import { codingStandardsPack, gitCommitPack } from '@cocasts/agent-config-packs';
 import { adoptAgentPack } from '../src/services/agent.ts';
+import { checkCliPack } from '../src/services/cli-pack.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -37,6 +38,35 @@ const createGeneratedProject = async (): Promise<string> => {
   await writeFile(
     join(root, 'AGENTS.md'),
     upsertManagedBlock('# Existing\n', 'git-commit', rendered.agentsBlock),
+  );
+  return root;
+};
+
+const codingStandardsConfig = {
+  commands: {
+    format: 'bun run format:check',
+    lint: 'bun run lint',
+    test: 'bun test',
+    typecheck: 'bun run typecheck',
+    verify: 'bun run verify',
+  },
+  language: 'typescript',
+  packageManager: 'bun',
+};
+
+const createCodingStandardsProject = async (): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-config-adopt-'));
+  temporaryDirectories.push(root);
+  const rendered = await codingStandardsPack.render(codingStandardsConfig);
+
+  for (const file of rendered.files) {
+    const path = join(root, file.path);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, file.content);
+  }
+  await writeFile(
+    join(root, 'AGENTS.md'),
+    upsertManagedBlock('# Existing\n', 'coding-standards', rendered.agentsBlock),
   );
   return root;
 };
@@ -84,6 +114,43 @@ describe('agent adoption', () => {
 
     await expect(adoptAgentPack(root, 'git-commit')).rejects.toThrow(
       'AGENTS managed block is invalid',
+    );
+  });
+
+  test('adopts agent-generated coding standards', async () => {
+    const root = await createCodingStandardsProject();
+
+    await adoptAgentPack(root, 'coding-standards');
+
+    const state = projectStateSchema.parse(
+      JSON.parse(await readFile(join(root, '.agents/.agent-config-state.json'), 'utf8')),
+    );
+    expect(state.packs['coding-standards']?.mode).toBe('agent');
+    expect(Object.keys(state.packs['coding-standards']?.files ?? {})).toEqual([
+      '.agents/rules/coding-standards.mdc',
+      '.agents/skills/code-quality-review/SKILL.md',
+    ]);
+    expect(state.packs['coding-standards']?.agentsBlock?.path).toBe('AGENTS.md');
+  });
+
+  test('checks an adopted agent-owned pack without CLI ownership', async () => {
+    const root = await createCodingStandardsProject();
+    await adoptAgentPack(root, 'coding-standards');
+
+    expect(await checkCliPack(root, 'coding-standards')).toEqual([]);
+
+    await writeFile(join(root, '.agents/rules/coding-standards.mdc'), 'hand edit');
+    expect(await checkCliPack(root, 'coding-standards')).toContain(
+      '.agents/rules/coding-standards.mdc has drifted from its recorded hash',
+    );
+  });
+
+  test('rejects incomplete coding standards output', async () => {
+    const root = await createCodingStandardsProject();
+    await writeFile(join(root, '.agents/skills/code-quality-review/SKILL.md'), 'stub');
+
+    await expect(adoptAgentPack(root, 'coding-standards')).rejects.toThrow(
+      'Generated pack is invalid',
     );
   });
 });

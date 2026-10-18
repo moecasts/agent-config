@@ -32,7 +32,9 @@ export const registerAgentCommands = (program: Command): void => {
           await installAgentConfigurator(resolve(options.cwd), source);
         },
       );
-      log.info('Invoke agent-configurator and ask it to install or update git-commit.');
+      log.info(
+        'Invoke agent-configurator and ask it to install or update a pack, such as git-commit or coding-standards.',
+      );
     });
 
   agent

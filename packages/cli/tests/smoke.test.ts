@@ -28,6 +28,8 @@ describe('acli entry point', () => {
     expect(install.exitCode).toBe(0);
     expect(adopt.exitCode).toBe(0);
     expect(install.stdout).toContain('git-commit');
+    expect(install.stdout).toContain('coding-standards');
     expect(adopt.stdout).toContain('git-commit');
+    expect(adopt.stdout).toContain('coding-standards');
   });
 });

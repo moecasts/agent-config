@@ -56,6 +56,26 @@ const createDelegatedProject = async (): Promise<string> => {
   return root;
 };
 
+const createPlainProject = async (): Promise<string> => {
+  const root = await mkdtemp(`${tmpdir()}/agent-config-e2e-`);
+  temporaryDirectories.push(root);
+  await writeFile(
+    resolve(root, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'standards',
+        private: true,
+        packageManager: 'npm@10.0.0',
+        scripts: { test: 'node --test', verify: 'node --test' },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(resolve(root, 'AGENTS.md'), '# Existing instructions\n');
+  return root;
+};
+
 describe('acli end-to-end', () => {
   test('installs, updates, checks, and detects drift with delegated AGENTS', async () => {
     const root = await createDelegatedProject();
@@ -77,5 +97,54 @@ describe('acli end-to-end', () => {
     const drifted = await runCli(root, 'check', 'git-commit');
     expect(drifted.exitCode).toBe(1);
     expect(drifted.output).toContain('has drifted from its recorded hash');
+  });
+
+  test('installs and checks coding-standards with detected tooling', async () => {
+    const root = await createPlainProject();
+
+    const install = await runCli(root, 'install', 'coding-standards', '--yes');
+    expect(install.exitCode, install.output).toBe(0);
+    expect(await readFile(resolve(root, '.agents/rules/coding-standards.mdc'), 'utf8')).toContain(
+      'KISS',
+    );
+    const skill = await readFile(
+      resolve(root, '.agents/skills/code-quality-review/SKILL.md'),
+      'utf8',
+    );
+    expect(skill).toContain('name: code-quality-review');
+    expect(skill).toContain('- Verify: `npm run verify`');
+    expect(await readFile(resolve(root, 'AGENTS.md'), 'utf8')).toContain(
+      'agent-config:coding-standards:start',
+    );
+
+    const check = await runCli(root, 'check', 'coding-standards');
+    expect(check.exitCode, check.output).toBe(0);
+
+    const update = await runCli(root, 'update', 'coding-standards', '--yes');
+    expect(update.exitCode, update.output).toBe(0);
+
+    await writeFile(resolve(root, '.agents/rules/coding-standards.mdc'), 'manual drift\n');
+    const drifted = await runCli(root, 'check', 'coding-standards');
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.output).toContain('has drifted from its recorded hash');
+  });
+
+  test('checks every installed pack when no pack is named', async () => {
+    const root = await createPlainProject();
+    expect((await runCli(root, 'install', 'coding-standards', '--yes')).exitCode).toBe(0);
+    expect((await runCli(root, 'install', 'git-commit', '--yes')).exitCode).toBe(0);
+
+    const clean = await runCli(root, 'check');
+    expect(clean.exitCode, clean.output).toBe(0);
+    expect(clean.output).toContain('coding-standards is valid and up to date.');
+    expect(clean.output).toContain('git-commit is valid and up to date.');
+
+    await writeFile(resolve(root, '.agents/rules/coding-standards.mdc'), 'manual drift\n');
+    const drifted = await runCli(root, 'check');
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.output).toContain(
+      '.agents/rules/coding-standards.mdc has drifted from its recorded hash',
+    );
+    expect(drifted.output).toContain('git-commit is valid and up to date.');
   });
 });

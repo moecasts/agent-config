@@ -1,86 +1,22 @@
 import { resolve } from 'node:path';
-import { cancel, confirm, intro, isCancel, log, note, outro, spinner, text } from '@clack/prompts';
-import {
-  detectGitCommitConfig,
-  type GitCommitConfig,
-  gitCommitConfigSchema,
-} from '@cocasts/agent-config-packs';
+import { cancel, confirm, intro, isCancel, log, note, outro, spinner } from '@clack/prompts';
 import type { Command } from 'commander';
 import { optionalPackArgument, requiredPackArgument } from '../pack-argument.ts';
 import {
   applyCliPackPlan,
   type CliPackOperation,
   checkCliPack,
+  installedPackIds,
   loadCliPackConfig,
   prepareCliPack,
 } from '../services/cli-pack.ts';
-import {
-  formatPlan,
-  formatScopeMappings,
-  parseCommaList,
-  parseScopeMappings,
-  runWithSpinner,
-} from '../ui.ts';
+import { getPackConfigAdapter } from '../services/pack-config.ts';
+import { formatPlan, runWithSpinner } from '../ui.ts';
 
 interface TargetOptions {
   cwd: string;
   yes?: boolean;
 }
-
-const promptForConfig = async (initial: GitCommitConfig): Promise<GitCommitConfig | undefined> => {
-  const mappings = await text({
-    message: 'Workspace scopes (path=scope, comma separated)',
-    defaultValue: '',
-    initialValue: formatScopeMappings(initial.scopes),
-    placeholder: 'none',
-    validate: (value) => {
-      try {
-        parseScopeMappings(value);
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    },
-  });
-  if (isCancel(mappings)) {
-    cancel('Installation cancelled.');
-    return undefined;
-  }
-
-  const extraScopes = await text({
-    message: 'Additional scopes (comma separated, optional)',
-    defaultValue: '',
-    initialValue: initial.extraScopes.join(', '),
-    placeholder: 'none',
-  });
-  if (isCancel(extraScopes)) {
-    cancel('Installation cancelled.');
-    return undefined;
-  }
-
-  return gitCommitConfigSchema.parse({
-    ...initial,
-    extraScopes: parseCommaList(extraScopes),
-    scopes: parseScopeMappings(mappings),
-  });
-};
-
-const mergeDetectedConfig = (
-  detected: GitCommitConfig,
-  current: GitCommitConfig,
-): GitCommitConfig => {
-  const mappings = new Map(detected.scopes.map((mapping) => [mapping.path, mapping]));
-  for (const mapping of current.scopes) {
-    mappings.set(mapping.path, mapping);
-  }
-  return {
-    ...detected,
-    agentsScope: current.agentsScope,
-    docsScope: current.docsScope,
-    extraScopes: current.extraScopes,
-    rootScope: current.rootScope,
-    scopes: [...mappings.values()].sort((left, right) => left.path.localeCompare(right.path)),
-  };
-};
 
 const confirmPlan = async (
   plan: Awaited<ReturnType<typeof prepareCliPack>>,
@@ -109,18 +45,20 @@ const runConfiguredOperation = async (
 ): Promise<void> => {
   const root = resolve(options.cwd);
   intro(`acli ${operation} ${packId}`);
+  const adapter = getPackConfigAdapter(packId);
   const detected = await runWithSpinner(
     spinner(),
-    'Inspecting project workspaces',
+    'Inspecting project configuration',
     'Project inspection complete',
-    () => detectGitCommitConfig(root),
+    () => adapter.detect(root),
   );
   const initial =
     operation === 'configure'
-      ? mergeDetectedConfig(detected, await loadCliPackConfig(root, packId))
+      ? adapter.merge(detected, await loadCliPackConfig(root, packId))
       : detected;
-  const config = options.yes ? initial : await promptForConfig(initial);
-  if (!config) {
+  const prompt = adapter.prompt;
+  const config = options.yes || !prompt ? initial : await prompt(initial);
+  if (config === undefined) {
     return;
   }
   const plan = await prepareCliPack(root, packId, operation, config);
@@ -137,27 +75,51 @@ const runConfiguredOperation = async (
   outro(`${packId} ${operation} complete.`);
 };
 
-const runUpdate = async (packId: string, options: TargetOptions): Promise<void> => {
+const runUpdate = async (packIds: readonly string[], options: TargetOptions): Promise<void> => {
   const root = resolve(options.cwd);
-  intro(`acli update ${packId}`);
-  const plan = await prepareCliPack(root, packId, 'update');
-  if (!(await confirmPlan(plan, options.yes === true))) {
-    return;
+  for (const packId of packIds) {
+    intro(`acli update ${packId}`);
+    const plan = await prepareCliPack(root, packId, 'update');
+    if (!(await confirmPlan(plan, options.yes === true))) {
+      return;
+    }
+    await applyCliPackPlan(root, plan);
+    outro(`${packId} update complete.`);
   }
-  await applyCliPackPlan(root, plan);
-  outro(`${packId} update complete.`);
 };
 
-const runCheck = async (packId: string, options: TargetOptions): Promise<void> => {
-  const errors = await checkCliPack(resolve(options.cwd), packId);
-  if (errors.length > 0) {
+const runCheck = async (packIds: readonly string[], options: TargetOptions): Promise<void> => {
+  const root = resolve(options.cwd);
+  for (const packId of packIds) {
+    const errors = await checkCliPack(root, packId);
+    if (errors.length === 0) {
+      log.success(`${packId} is valid and up to date.`);
+      continue;
+    }
     for (const error of errors) {
       log.error(error);
     }
     process.exitCode = 1;
-    return;
   }
-  log.success(`${packId} is valid and up to date.`);
+};
+
+/**
+ * `update` and `check` without a pack argument cover every installed pack:
+ * defaulting to one pack reports success while another installed pack has
+ * drifted.
+ */
+const resolveTargetPacks = async (
+  root: string,
+  packId: string | undefined,
+): Promise<readonly string[]> => {
+  if (packId !== undefined) {
+    return [packId];
+  }
+  const installed = await installedPackIds(root);
+  if (installed.length === 0) {
+    throw new Error('No packs are installed');
+  }
+  return installed;
 };
 
 const addTargetOptions = <T extends Command>(command: T, includeYes: boolean): T => {
@@ -192,10 +154,15 @@ export const registerPackCommands = (program: Command): void => {
   addTargetOptions(
     program
       .command('update')
-      .description('Render a pack from its committed project configuration.')
+      .description(
+        'Render a pack, or every installed pack, from its committed project configuration.',
+      )
       .addArgument(optionalPackArgument('Pack to update.')),
     true,
-  ).action((pack: string, options: TargetOptions) => runUpdate(pack, options));
+  ).action(async (pack: string | undefined, options: TargetOptions) => {
+    const targets = await resolveTargetPacks(resolve(options.cwd), pack);
+    await runUpdate(targets, options);
+  });
 
   addTargetOptions(
     program
@@ -203,5 +170,8 @@ export const registerPackCommands = (program: Command): void => {
       .description('Check managed files without changing them.')
       .addArgument(optionalPackArgument('Pack to check.')),
     false,
-  ).action((pack: string, options: TargetOptions) => runCheck(pack, options));
+  ).action(async (pack: string | undefined, options: TargetOptions) => {
+    const targets = await resolveTargetPacks(resolve(options.cwd), pack);
+    await runCheck(targets, options);
+  });
 };

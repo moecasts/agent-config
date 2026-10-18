@@ -8,9 +8,10 @@ import {
   prepareFileChanges,
   sha256,
 } from '@cocasts/agent-config-core';
+import { packIds } from '@cocasts/agent-config-packs';
 import { readOptionalFile } from './project.ts';
 
-const SKILL_FILES = ['SKILL.md', 'references/git-commit.md'] as const;
+const SKILL_FILES = ['SKILL.md', ...packIds.map((packId) => `references/${packId}.md`)] as const;
 const INSTALL_PATH = '.agents/skills/agent-configurator';
 
 export const resolveBundledAgentConfigurator = async (): Promise<string> => {

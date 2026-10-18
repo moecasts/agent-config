@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectStateSchema } from '@cocasts/agent-config-core';
+import { gitCommitConfigSchema } from '@cocasts/agent-config-packs';
 import {
   applyCliPackPlan,
   checkCliPack,
@@ -33,6 +34,58 @@ const config = {
   rootScope: 'root',
   scopes: [{ path: 'packages/image-view', scope: 'image-view' }],
 };
+
+const codingStandardsConfig = {
+  commands: { format: null, lint: null, test: null, typecheck: null, verify: null },
+  language: null,
+  packageManager: null,
+};
+
+describe('coding-standards CLI lifecycle', () => {
+  const rulePath = '.agents/rules/coding-standards.mdc';
+  const skillPath = '.agents/skills/code-quality-review/SKILL.md';
+
+  test('installs a detected config and updates idempotently', async () => {
+    const root = await createProject();
+    const plan = await prepareCliPack(root, 'coding-standards', 'install', codingStandardsConfig);
+
+    expect(plan.config).toEqual(codingStandardsConfig);
+    await applyCliPackPlan(root, plan);
+
+    expect(await checkCliPack(root, 'coding-standards')).toEqual([]);
+    expect(await loadCliPackConfig(root, 'coding-standards')).toEqual(codingStandardsConfig);
+    expect(
+      JSON.parse(await readFile(join(root, '.agent-config.json'), 'utf8')).packs[
+        'coding-standards'
+      ],
+    ).toEqual(codingStandardsConfig);
+    expect(await readFile(join(root, rulePath), 'utf8')).toContain('KISS');
+    expect(await readFile(join(root, skillPath), 'utf8')).toContain('name: code-quality-review');
+    expect(await readFile(join(root, 'AGENTS.md'), 'utf8')).toContain(
+      '# Existing project instructions',
+    );
+
+    const updatePlan = await prepareCliPack(root, 'coding-standards', 'update');
+    expect(updatePlan.changes.every((change) => change.status === 'unchanged')).toBe(true);
+  });
+
+  test('rejects unknown configuration and reports drift', async () => {
+    const root = await createProject();
+    await applyCliPackPlan(
+      root,
+      await prepareCliPack(root, 'coding-standards', 'install', codingStandardsConfig),
+    );
+
+    await expect(
+      prepareCliPack(root, 'coding-standards', 'configure', { strictness: 'high' }),
+    ).rejects.toThrow();
+
+    await writeFile(join(root, rulePath), 'manual edit');
+    expect(await checkCliPack(root, 'coding-standards')).toContain(
+      `${rulePath} has drifted from its recorded hash`,
+    );
+  });
+});
 
 describe('CLI-managed pack lifecycle', () => {
   test('plans without writing, installs, and checks deterministic output', async () => {
@@ -68,7 +121,7 @@ describe('CLI-managed pack lifecycle', () => {
       }),
     );
 
-    const stored = await loadCliPackConfig(root, 'git-commit');
+    const stored = gitCommitConfigSchema.parse(await loadCliPackConfig(root, 'git-commit'));
     expect(stored.extraScopes).toEqual(['infra']);
     const updatePlan = await prepareCliPack(root, 'git-commit', 'update');
     expect(updatePlan.config).toEqual(stored);

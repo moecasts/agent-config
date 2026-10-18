@@ -10,7 +10,7 @@ import {
   sha256,
   upsertManagedBlock,
 } from '@cocasts/agent-config-core';
-import { type GitCommitConfig, getPack } from '@cocasts/agent-config-packs';
+import { getPack } from '@cocasts/agent-config-packs';
 import {
   CONFIG_PATH,
   loadProjectConfig,
@@ -24,12 +24,18 @@ export type CliPackOperation = 'configure' | 'install' | 'update';
 
 export interface CliPackPlan {
   changes: readonly PreparedFileChange[];
-  config: GitCommitConfig;
+  config: unknown;
   operation: CliPackOperation;
   packId: string;
 }
 
-export const loadCliPackConfig = async (root: string, packId: string): Promise<GitCommitConfig> => {
+/** Pack ids recorded in project state, in install order. */
+export const installedPackIds = async (root: string): Promise<readonly string[]> => {
+  const { state } = await loadProjectState(root);
+  return Object.keys(state.packs);
+};
+
+export const loadCliPackConfig = async (root: string, packId: string): Promise<unknown> => {
   const pack = getPack(packId);
   const { config } = await loadProjectConfig(root);
   const packConfig = config.packs[packId];
@@ -135,6 +141,12 @@ export const prepareCliPack = async (
 export const applyCliPackPlan = (root: string, plan: CliPackPlan): Promise<void> =>
   applyFileChanges(root, plan.changes);
 
+/**
+ * Validates an installed pack without writing anything. Handles both ownership
+ * modes: CLI-owned packs are re-rendered from `.agent-config.json` and compared
+ * against it, while agent-owned packs are checked against their recorded hashes
+ * and the pack's own `validate` contract.
+ */
 export const checkCliPack = async (root: string, packId: string): Promise<readonly string[]> => {
   const pack = getPack(packId);
   const { state } = await loadProjectState(root);
@@ -142,25 +154,29 @@ export const checkCliPack = async (root: string, packId: string): Promise<readon
   if (!packState) {
     return [`Pack is not installed: ${packId}`];
   }
-  assertInstallationMode(state, packId, 'cli');
 
-  const config = await loadCliPackConfig(root, packId);
-  const rendered = await pack.render(config);
+  const rendered =
+    packState.mode === 'cli' ? await pack.render(await loadCliPackConfig(root, packId)) : undefined;
+  const expectedFiles = new Map((rendered?.files ?? []).map((file) => [file.path, file.content]));
+
   const errors: string[] = [];
   const contents: Record<string, string> = {};
 
-  for (const file of rendered.files) {
-    const content = await readOptionalFile(resolve(root, file.path));
+  for (const path of pack.filePaths) {
+    const content = await readOptionalFile(resolve(root, path));
     if (content === undefined) {
-      errors.push(`${file.path} is missing`);
+      errors.push(`${path} is missing`);
       continue;
     }
-    contents[file.path] = content;
-    const recordedHash = packState.files[file.path];
+    contents[path] = content;
+    const recordedHash = packState.files[path];
     if (recordedHash !== sha256(content)) {
-      errors.push(`${file.path} has drifted from its recorded hash`);
-    } else if (sha256(file.content) !== recordedHash) {
-      errors.push(`${file.path} is out of date with pack ${pack.version}`);
+      errors.push(`${path} has drifted from its recorded hash`);
+      continue;
+    }
+    const expectedContent = expectedFiles.get(path);
+    if (expectedContent !== undefined && sha256(expectedContent) !== recordedHash) {
+      errors.push(`${path} does not match the current pack ${pack.version} output`);
     }
   }
   errors.push(...pack.validate(contents));
@@ -173,8 +189,10 @@ export const checkCliPack = async (root: string, packId: string): Promise<readon
     const currentHash = sha256(agentsBlock);
     if (currentHash !== packState.agentsBlock.hash) {
       errors.push(`${agentsFile.path} managed block has drifted from its recorded hash`);
-    } else if (currentHash !== sha256(rendered.agentsBlock.trimEnd())) {
-      errors.push(`${agentsFile.path} managed block is out of date with pack ${pack.version}`);
+    } else if (rendered !== undefined && currentHash !== sha256(rendered.agentsBlock.trimEnd())) {
+      errors.push(
+        `${agentsFile.path} managed block does not match the current pack ${pack.version} output`,
+      );
     }
     errors.push(...pack.validateAgentsBlock(agentsBlock));
   }

@@ -1,9 +1,9 @@
-import { access, chmod, cp, mkdir, rm } from 'node:fs/promises';
+import { chmod, cp, mkdir, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assembleAgentConfigurator, validateAgentConfigurator } from '@cocasts/agent-config-agent';
+import { packIds, packTemplateRoots } from '@cocasts/agent-config-packs';
 
 const packageRoot = resolve(import.meta.dir, '..');
-const workspaceRoot = resolve(packageRoot, '../..');
 const outdir = resolve(packageRoot, 'dist');
 
 await rm(outdir, { force: true, recursive: true });
@@ -27,20 +27,24 @@ if (!result.success) {
 
 await chmod(resolve(outdir, 'cli.js'), 0o755);
 
-const copyIfPresent = async (source: string, destination: string): Promise<void> => {
-  try {
-    await access(source);
-  } catch {
-    return;
+// Pack templates are read at runtime relative to dist/cli.js, so every pack
+// contributes uniquely named templates to one flat directory. Only `.tpl` files
+// ship: a stray editor or OS file must not fail the duplicate-name guard.
+const templatesDestination = resolve(outdir, 'templates');
+await mkdir(templatesDestination, { recursive: true });
+const copiedTemplates = new Set<string>();
+for (const packId of packIds) {
+  const sourceRoot = packTemplateRoots[packId];
+  const files = (await readdir(sourceRoot)).filter((file) => file.endsWith('.tpl'));
+  for (const file of files) {
+    if (copiedTemplates.has(file)) {
+      throw new Error(`Duplicate pack template name: ${file}`);
+    }
+    copiedTemplates.add(file);
+    await cp(resolve(sourceRoot, file), resolve(templatesDestination, file));
   }
+}
 
-  await cp(source, destination, { recursive: true });
-};
-
-await copyIfPresent(
-  resolve(workspaceRoot, 'packages/packs/src/git-commit/templates'),
-  resolve(outdir, 'templates'),
-);
 const agentSkillDestination = resolve(outdir, 'assets/agent-skill/agent-configurator');
 await assembleAgentConfigurator(agentSkillDestination);
 const agentSkillErrors = await validateAgentConfigurator(agentSkillDestination);
