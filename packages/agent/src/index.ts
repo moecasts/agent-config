@@ -1,9 +1,11 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readGitCommitAgentGuide } from '@cocasts/agent-config-packs';
+import { getPack, packAgentGuides, packIds } from '@cocasts/agent-config-packs';
 
 const defaultSkillRoot = fileURLToPath(new URL('../skills/agent-configurator', import.meta.url));
+
+const referencePath = (packId: string): string => `references/${packId}.md`;
 
 const readOptional = async (path: string): Promise<string | undefined> => {
   try {
@@ -24,17 +26,15 @@ export const assembleAgentConfigurator = async (
   await mkdir(resolve(destination, 'references'), { recursive: true });
   await Promise.all([
     copyFile(resolve(skillRoot, 'SKILL.md'), resolve(destination, 'SKILL.md')),
-    readGitCommitAgentGuide().then((guide) =>
-      writeFile(resolve(destination, 'references/git-commit.md'), guide, 'utf8'),
-    ),
+    ...packIds.map(async (packId) => {
+      const guide = await packAgentGuides[packId]();
+      await writeFile(resolve(destination, referencePath(packId)), guide, 'utf8');
+    }),
   ]);
 };
 
 export const validateAgentConfigurator = async (root: string): Promise<readonly string[]> => {
-  const [skill, guide] = await Promise.all([
-    readOptional(resolve(root, 'SKILL.md')),
-    readOptional(resolve(root, 'references/git-commit.md')),
-  ]);
+  const skill = await readOptional(resolve(root, 'SKILL.md'));
   const errors: string[] = [];
 
   const hasValidFrontmatter =
@@ -50,6 +50,7 @@ export const validateAgentConfigurator = async (root: string): Promise<readonly 
       ['AGENTS.md', 'AGENTS preservation'],
       ['staged, unstaged, untracked', 'Git staging context'],
       ['acli agent adopt <pack>', 'agent adoption'],
+      ...packIds.map((packId) => [`references/${packId}.md`, `${packId} pack guide`] as const),
     ] as const;
     for (const [requiredText, label] of requiredGuidance) {
       if (!skill.includes(requiredText)) {
@@ -57,10 +58,19 @@ export const validateAgentConfigurator = async (root: string): Promise<readonly 
       }
     }
   }
-  if (!guide) {
-    errors.push('references/git-commit.md is missing');
-  } else if (!guide.includes('staged, unstaged, and untracked') || !guide.includes('AGENTS.md')) {
-    errors.push('references/git-commit.md is missing required pack guidance');
+
+  const guides = await Promise.all(
+    packIds.map(async (packId) => ({
+      content: await readOptional(resolve(root, referencePath(packId))),
+      packId,
+    })),
+  );
+  for (const { content, packId } of guides) {
+    if (content === undefined) {
+      errors.push(`${referencePath(packId)} is missing`);
+      continue;
+    }
+    errors.push(...getPack(packId).validateAgentGuide(content));
   }
 
   return errors;

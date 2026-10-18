@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readGitCommitAgentGuide } from '@cocasts/agent-config-packs';
+import {
+  readCodingStandardsAgentGuide,
+  readGitCommitAgentGuide,
+} from '@cocasts/agent-config-packs';
 import { assembleAgentConfigurator, validateAgentConfigurator } from '../src/index.ts';
 
 const temporaryDirectories: string[] = [];
@@ -30,6 +33,9 @@ describe('agent-configurator assembly', () => {
     expect(await readFile(join(destination, 'references/git-commit.md'), 'utf8')).toBe(
       await readGitCommitAgentGuide(),
     );
+    expect(await readFile(join(destination, 'references/coding-standards.md'), 'utf8')).toBe(
+      await readCodingStandardsAgentGuide(),
+    );
     const skill = await readFile(join(destination, 'SKILL.md'), 'utf8');
     expect(skill).toContain('name: agent-configurator');
     expect(skill).toContain(
@@ -46,6 +52,7 @@ describe('agent-configurator assembly', () => {
     expect(await validateAgentConfigurator(root)).toEqual([
       'SKILL.md must contain valid agent-configurator frontmatter',
       'references/git-commit.md is missing',
+      'references/coding-standards.md is missing',
     ]);
   });
 

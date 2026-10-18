@@ -45,6 +45,18 @@ staged, unstaged, untracked, and partially staged changes separately when
 designing the smart-commit workflow. The generated skill must present an exact
 commit plan and wait for approval before any index mutation or commit.
 
+## Coding standards pack
+
+For `coding-standards`, read [the generation guide](references/coding-standards.md).
+Inspect the repository's languages, tooling, and existing conventions, then
+generate an always-on rule and an on-demand review skill that gives every unit of
+a change a verdict. Keep the rule
+concise, include every required principle and guardrail, scope reviews to the
+change with explicit evidence, and do not perform the refactors you recommend.
+Reference repository paths as inline code, record a baseline with check-only
+formatting, bound large diffs, and define the fallback when the rule file is
+missing.
+
 ## Stop signs
 
 - Do not create commits while installing or updating agent configuration.
